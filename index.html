@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>NexLink — Secure P2P File Transfer</title>
+<title>OreoPie — Secure P2P File Transfer</title>
 <script src="https://cdn.emailjs.com/dist/email.min.js"></script>
 <style>
   :root{
@@ -188,7 +188,7 @@
 
 <script type="module">
 /* ============================================================
-   NexLink — P2P encrypted file transfer over WebRTC
+   OreoPie — P2P encrypted file transfer over WebRTC
    Signaling: Supabase Realtime (broadcast channel keyed by code)
    Auth: Supabase table (demo — hash password client-side, no email)
    ============================================================ */
@@ -255,21 +255,21 @@ const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 // ============================================================
 async function signup(username, password) {
   const hash = await sha256(password + username);
-  const { data, error } = await supabase.from('NexLink_users')
+  const { data, error } = await supabase.from('oreopie_users')
     .insert({ username, password_hash: hash }).select().single();
   if (error) throw error;
   return { id: data.id, username };
 }
 async function login(username, password) {
   const hash = await sha256(password + username);
-  const { data, error } = await supabase.from('NexLink_users')
+  const { data, error } = await supabase.from('oreopie_users')
     .select('*').eq('username', username).eq('password_hash', hash).single();
   if (error || !data) throw new Error('Invalid username or password');
   return { id: data.id, username };
 }
 async function searchUsers(q) {
   if (!q || q.length < 2) return [];
-  const { data, error } = await supabase.from('NexLink_users')
+  const { data, error } = await supabase.from('oreopie_users')
     .select('username').ilike('username', `%${q}%`).neq('username', state.user.username).limit(6);
   if (error) return [];
   return data.map(d => d.username);
@@ -315,7 +315,7 @@ function createPeerConnection(peerId, username, initiator) {
   };
 
   if (initiator) {
-    const dc = pc.createDataChannel('NexLink');
+    const dc = pc.createDataChannel('oreopie');
     setupDataChannel(peerId, dc);
     pc.onnegotiationneeded = async () => {
       const offer = await pc.createOffer();
@@ -496,7 +496,7 @@ function topbar() {
   const el = document.createElement('header');
   el.className = 'topbar';
   el.innerHTML = `
-    <div class="brand"><span class="dot"></span> NexLink <span class="tag">E2E · P2P</span></div>
+    <div class="brand"><span class="dot"></span> OreoPie <span class="tag">E2E · P2P</span></div>
     <div class="user-pill">${state.user ? `<b>${state.user.username}</b> <button class="btn ghost" id="logout">Logout</button>` : ''}</div>`;
   if (state.user) el.querySelector('#logout').onclick = () => location.reload();
   return el;
