@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OreoPie — Secure P2P File Transfer</title>
-<script src="https://cdn.emailjs.com/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root{
     --bg:#070a10;
@@ -201,7 +201,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_nit6Giy4-k4zOjVg0qLS9g_RYjz2CzJ';
 
 // EmailJS (free, no backend) — used only for the "share code via email" button
 const EMAILJS_PUBLIC_KEY = 'YQKYZkAIF1B1NoNLg';
-const EMAILJS_SERVICE_ID = 'service_cvzlskl'; 
+const EMAILJS_SERVICE_ID = 'service_cvzlskl';
 const EMAILJS_TEMPLATE_ID = 'template_a0ytuq6';
 // -----------------------------------------------------------------------------
 
@@ -283,7 +283,7 @@ async function sendCodeEmail(fromEmail, toEmail, code, hostUsername) {
     from_email: fromEmail,
     code,
     host_username: hostUsername,
-  });
+  }, { publicKey: EMAILJS_PUBLIC_KEY }); // explicit key on every send — sidesteps any init() timing/version issue
 }
 
 // ============================================================
