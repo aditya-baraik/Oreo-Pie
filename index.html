@@ -200,12 +200,13 @@ const SUPABASE_URL = 'https://azggwkbzlihmquzpvdmf.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_nit6Giy4-k4zOjVg0qLS9g_RYjz2CzJ';
 
 // EmailJS (free, no backend) — used only for the "share code via email" button
-const EMAILJS_PUBLIC_KEY = 'YOUR_EMAILJS_PUBLIC_KEY';
-const EMAILJS_SERVICE_ID = 'YOUR_EMAILJS_SERVICE_ID';
-const EMAILJS_TEMPLATE_ID = 'YOUR_EMAILJS_TEMPLATE_ID';
+const EMAILJS_PUBLIC_KEY = 'VwkAItbRfdhrJuyNo';
+const EMAILJS_SERVICE_ID = 'service_cvzlskl';
+const EMAILJS_TEMPLATE_ID = 'template_a0ytuq6';
 // -----------------------------------------------------------------------------
 
-if (window.emailjs) window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+const EMAILJS_CONFIGURED = ![EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID].some(v => !v || v.startsWith('YOUR_'));
+if (window.emailjs && EMAILJS_CONFIGURED) window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const CHUNK_SIZE = 16 * 1024; // 16KB datachannel chunks
 
@@ -276,6 +277,7 @@ async function searchUsers(q) {
 }
 async function sendCodeEmail(fromEmail, toEmail, code, hostUsername) {
   if (!window.emailjs) throw new Error('Email service failed to load.');
+  if (!EMAILJS_CONFIGURED) throw new Error('EmailJS not configured — set real keys in SETUP.md.');
   return emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
     to_email: toEmail,
     from_email: fromEmail,
@@ -364,6 +366,7 @@ function handlePresenceJoin(peerId, username) {
   if (peerId === state.user.id || state.peers.has(peerId)) return;
   const iAmInitiator = state.user.id < peerId;
   createPeerConnection(peerId, username, iAmInitiator);
+  if (!document.querySelector('.dash')) render(DashboardView());
   renderPeerList();
 }
 
@@ -546,82 +549,164 @@ function ModeChoiceView() {
       </div>
     </div>`;
   wrap.appendChild(main);
-  wrap.querySelector('#nearby').onclick = () => render(NearbyView());
-  wrap.querySelector('#remote').onclick = () => render(RemoteView());
+  wrap.querySelector('#nearby').onclick = () => render(RoleChoiceView('nearby'));
+  wrap.querySelector('#remote').onclick = () => render(RoleChoiceView('remote'));
   return wrap;
 }
 
-// ---- Nearby pairing ----
-function NearbyView() {
+// ---- Role choice: Share vs Receive (applies to both Nearby and Remote) ----
+function RoleChoiceView(mode) {
+  const wrap = document.createElement('div');
+  wrap.appendChild(topbar());
+  const main = document.createElement('main');
+  const modeLabel = mode === 'nearby' ? 'Nearby' : 'Remote';
+  main.innerHTML = `
+    <div class="center-col" style="max-width:560px">
+      <h1 style="text-align:center; margin-bottom:6px; font-size:24px;">${modeLabel} — Share or Receive?</h1>
+      <p class="sub" style="text-align:center; margin-bottom:20px;">Pick one side. The other device(s) must pick the opposite.</p>
+      <div class="mode-grid">
+        <div class="mode-card a" id="share"><div class="icon">↑</div><h3>Share</h3><p>Generate a code. Send files to whoever enters it.</p></div>
+        <div class="mode-card b" id="receive"><div class="icon">↓</div><h3>Receive</h3><p>Enter a code someone shared with you to connect.</p></div>
+      </div>
+      <div class="switch-link"><a id="back">← Back</a></div>
+    </div>`;
+  wrap.appendChild(main);
+  wrap.querySelector('#back').onclick = () => render(ModeChoiceView());
+  wrap.querySelector('#share').onclick = () => render(mode === 'nearby' ? NearbyShareView() : RemoteShareView());
+  wrap.querySelector('#receive').onclick = () => render(mode === 'nearby' ? NearbyReceiveView() : RemoteReceiveView());
+  return wrap;
+}
+
+// ---- Nearby: Share (host — generates code, waits) ----
+function NearbyShareView() {
   const code = randCode();
   const wrap = document.createElement('div');
   wrap.appendChild(topbar());
   const main = document.createElement('main');
   main.innerHTML = `
     <div class="center-col"><div class="card">
-      <h1>Nearby pairing</h1>
-      <p class="sub">Share this code with up to 4 other devices. Everyone enters the same code.</p>
+      <h1>Nearby — Sharing</h1>
+      <p class="sub">Give this code to up to 4 other devices. Dashboard opens automatically once someone connects.</p>
       <div class="code-display">${code}</div>
-      <p class="hint">Or already have a code from another device?</p>
+      <p class="hint" id="waitHint">Waiting for devices to join…</p>
+      <div class="switch-link"><a id="back">← Back</a></div>
+    </div></div>`;
+  wrap.appendChild(main);
+  wrap.querySelector('#back').onclick = () => { resetRoom(); render(RoleChoiceView('nearby')); };
+  enterRoom(`nearby:${code}`, true);
+  return wrap;
+}
+
+// ---- Nearby: Receive (join with a code, nothing generated) ----
+function NearbyReceiveView() {
+  const wrap = document.createElement('div');
+  wrap.appendChild(topbar());
+  const main = document.createElement('main');
+  main.innerHTML = `
+    <div class="center-col"><div class="card">
+      <h1>Nearby — Receiving</h1>
+      <p class="sub">Enter the 6-digit code shown on the sharing device.</p>
       <div class="code-boxes" id="entry">${Array.from({length:6}).map((_,i)=>`<input maxlength="1" data-i="${i}" inputmode="numeric" />`).join('')}</div>
       <button class="btn primary" id="join" style="width:100%">Connect</button>
+      <div class="err hidden" id="err"></div>
       <div class="switch-link"><a id="back">← Back</a></div>
     </div></div>`;
   wrap.appendChild(main);
   const inputs = [...wrap.querySelectorAll('#entry input')];
   inputs.forEach((inp, i) => inp.addEventListener('input', () => { if (inp.value && inputs[i+1]) inputs[i+1].focus(); }));
-  wrap.querySelector('#back').onclick = () => render(ModeChoiceView());
+  wrap.querySelector('#back').onclick = () => render(RoleChoiceView('nearby'));
   wrap.querySelector('#join').onclick = () => {
-    const entered = inputs.map(i => i.value).join('') || code;
+    const entered = inputs.map(i => i.value).join('');
+    const errEl = wrap.querySelector('#err');
+    if (entered.length !== 6) { errEl.textContent = 'Enter all 6 digits.'; errEl.classList.remove('hidden'); return; }
     enterRoom(`nearby:${entered}`);
   };
-  // auto-open own code as a room too, so others joining the same code find us
-  enterRoom(`nearby:${code}`, true);
   return wrap;
 }
 
-// ---- Remote pairing ----
-function RemoteView() {
+// ---- Remote: Share (host — shows User ID + code, auto-emails it) ----
+function RemoteShareView() {
   const myCode = randCode();
   const wrap = document.createElement('div');
   wrap.appendChild(topbar());
   const main = document.createElement('main');
-  main.style.alignItems = 'flex-start';
   main.innerHTML = `
-    <div style="display:flex; gap:20px; max-width:900px; width:100%; flex-wrap:wrap; justify-content:center;">
-      <div class="center-col"><div class="card">
-        <h1>Remote pairing</h1>
-        <p class="sub">Search for a User ID to join their room, or share your own code below to host.</p>
+    <div class="center-col"><div class="card">
+      <h1>Remote — Sharing</h1>
+      <p class="sub">Others connect using your User ID (<b style="color:var(--cyan)">${state.user.username}</b>) + this code.</p>
+      <div class="code-display">${myCode}</div>
+      <p class="hint" id="waitHint">Waiting for a device to connect…</p>
 
-        <div class="field"><label>Search a User ID</label><input id="search" placeholder="type a username…" autocomplete="off" /></div>
-        <div id="results" style="margin-bottom:14px;"></div>
+      <p class="hint" style="margin:16px 0 8px;">Optional — auto-email the code (no need to leave the site):</p>
+      <div class="field"><label>Your email (sender)</label><input id="fromEmail" type="email" placeholder="you@example.com" /></div>
+      <div class="field"><label>Recipient's email</label><input id="toEmail" type="email" placeholder="friend@example.com" /></div>
+      <div class="err hidden" id="mailErr"></div>
+      <div class="hint hidden" id="mailStatus" style="color:var(--green)"></div>
+      <div class="switch-link"><a id="back">← Back</a></div>
+    </div></div>`;
+  wrap.appendChild(main);
+  wrap.querySelector('#back').onclick = () => { resetRoom(); render(RoleChoiceView('remote')); };
 
-        <div class="field"><label>Host User ID</label><input id="hostId" placeholder="their user id" /></div>
-        <div class="field"><label>6-digit code</label><input id="rcode" maxlength="6" inputmode="numeric" /></div>
-        <button class="btn primary" id="join" style="width:100%">Connect</button>
-        <div class="switch-link"><a id="back">← Back</a></div>
-      </div></div>
+  // auto-send the code once both emails look valid — no button needed
+  const fromEl = wrap.querySelector('#fromEmail');
+  const toEl = wrap.querySelector('#toEmail');
+  const errEl = wrap.querySelector('#mailErr');
+  const statusEl = wrap.querySelector('#mailStatus');
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  let sent = false, debounce;
+  function tryAutoSend() {
+    clearTimeout(debounce);
+    if (sent) return;
+    const fromEmail = fromEl.value.trim(), toEmail = toEl.value.trim();
+    if (!emailRe.test(fromEmail) || !emailRe.test(toEmail)) return;
+    debounce = setTimeout(async () => {
+      errEl.classList.add('hidden');
+      statusEl.classList.remove('hidden'); statusEl.style.color = 'var(--muted)'; statusEl.textContent = 'Sending code…';
+      try {
+        await sendCodeEmail(fromEmail, toEmail, myCode, state.user.username);
+        sent = true;
+        statusEl.style.color = 'var(--green)'; statusEl.textContent = `✓ Code sent to ${toEmail}`;
+      } catch (e) {
+        statusEl.classList.add('hidden');
+        errEl.textContent = 'Could not auto-send — check EmailJS config in SETUP.md. Share the code manually instead.';
+        errEl.classList.remove('hidden');
+      }
+    }, 700);
+  }
+  fromEl.addEventListener('input', tryAutoSend);
+  toEl.addEventListener('input', tryAutoSend);
 
-      <div class="center-col"><div class="card">
-        <h1>Your hosting code</h1>
-        <p class="sub">Others join by entering your User ID (<b style="color:var(--cyan)">${state.user.username}</b>) + this code.</p>
-        <div class="code-display">${myCode}</div>
+  enterRoom(`remote:${state.user.username}:${myCode}`, true);
+  return wrap;
+}
 
-        <p class="hint" style="margin-bottom:8px;">Share this code by email — no need to leave the site.</p>
-        <div class="field"><label>Your email (sender)</label><input id="fromEmail" type="email" placeholder="you@example.com" /></div>
-        <div class="field"><label>Recipient's email</label><input id="toEmail" type="email" placeholder="friend@example.com" /></div>
-        <div class="field"><label>Code to send</label><input id="mailCode" value="${myCode}" maxlength="6" inputmode="numeric" /></div>
-        <button class="btn ghost" id="sendMail" style="width:100%">✉ Send code by email</button>
-        <div class="err hidden" id="mailErr"></div>
-      </div></div>
-    </div>`;
+// ---- Remote: Receive (join by User ID + code, nothing generated) ----
+function RemoteReceiveView() {
+  const wrap = document.createElement('div');
+  wrap.appendChild(topbar());
+  const main = document.createElement('main');
+  main.innerHTML = `
+    <div class="center-col"><div class="card">
+      <h1>Remote — Receiving</h1>
+      <p class="sub">Search for the sharer's User ID, or type it, then enter their code.</p>
+
+      <div class="field"><label>Search a User ID</label><input id="search" placeholder="type a username…" autocomplete="off" /></div>
+      <div id="results" style="margin-bottom:14px;"></div>
+
+      <div class="field"><label>Host User ID</label><input id="hostId" placeholder="their user id" /></div>
+      <div class="field"><label>6-digit code</label><input id="rcode" maxlength="6" inputmode="numeric" /></div>
+      <button class="btn primary" id="join" style="width:100%">Connect</button>
+      <div class="err hidden" id="err"></div>
+      <div class="switch-link"><a id="back">← Back</a></div>
+    </div></div>`;
   wrap.appendChild(main);
 
-  wrap.querySelector('#back').onclick = () => render(ModeChoiceView());
+  wrap.querySelector('#back').onclick = () => render(RoleChoiceView('remote'));
   wrap.querySelector('#join').onclick = () => {
     const hostId = wrap.querySelector('#hostId').value.trim();
     const rcode = wrap.querySelector('#rcode').value.trim();
-    if (!hostId || !rcode) return;
+    const errEl = wrap.querySelector('#err');
+    if (!hostId || rcode.length !== 6) { errEl.textContent = 'Enter the host User ID and full 6-digit code.'; errEl.classList.remove('hidden'); return; }
     enterRoom(`remote:${hostId}:${rcode}`);
   };
 
@@ -642,31 +727,13 @@ function RemoteView() {
     }, 300);
   });
 
-  // send code via email (EmailJS — free, client-side, no backend)
-  wrap.querySelector('#sendMail').onclick = async () => {
-    const fromEmail = wrap.querySelector('#fromEmail').value.trim();
-    const toEmail = wrap.querySelector('#toEmail').value.trim();
-    const code = wrap.querySelector('#mailCode').value.trim();
-    const errEl = wrap.querySelector('#mailErr');
-    errEl.classList.add('hidden');
-    if (!fromEmail || !toEmail || code.length !== 6) {
-      errEl.textContent = 'Fill both emails and a 6-digit code.'; errEl.classList.remove('hidden'); return;
-    }
-    const btn = wrap.querySelector('#sendMail');
-    btn.disabled = true; btn.textContent = 'Sending…';
-    try {
-      await sendCodeEmail(fromEmail, toEmail, code, state.user.username);
-      btn.textContent = '✓ Sent';
-      toast('Code emailed', `Sent to ${toEmail}.`);
-    } catch (e) {
-      errEl.textContent = 'Could not send — check EmailJS config in SETUP.md.'; errEl.classList.remove('hidden');
-      btn.textContent = '✉ Send code by email';
-    } finally { btn.disabled = false; }
-  };
-
-  // host waits on their own id+code room
-  enterRoom(`remote:${state.user.username}:${myCode}`, true);
   return wrap;
+}
+
+function resetRoom() {
+  if (state.channel) { supabase.removeChannel(state.channel); }
+  state.channel = null;
+  state.roomKey = null;
 }
 
 function enterRoom(roomKey, isHostWait = false) {
