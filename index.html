@@ -290,8 +290,7 @@ async function sendCodeEmail(fromEmail, toEmail, code, hostUsername) {
 function joinRoom(roomKey, onMessage) {
   const channel = supabase.channel(roomKey, { config: { broadcast: { self: false }, presence: { key: state.user.id } } });
   channel.on('broadcast', { event: 'signal' }, (payload) => onMessage(payload.payload));
-  channel.subscribe();
-  return channel;
+  return channel; // caller adds any extra .on() listeners, then subscribes once
 }
 function sendSignal(channel, msg) {
   channel.send({ type: 'broadcast', event: 'signal', payload: msg });
